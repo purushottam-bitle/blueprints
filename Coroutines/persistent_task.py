@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 import subprocess
 import os
+import psutil
 from threading import Lock
 from sqlalchemy.orm import Session
 from models import Task as TaskModel
@@ -19,6 +20,24 @@ class TaskManager:
     def __init__(self):
         self.active_tasks: Dict[str, subprocess.Popen] = {}
         self.lock = Lock()
+
+    def reconstruct_from_db(self, db: Session):
+        running_tasks = db.query(TaskModel).filter(TaskModel.status == "running").all()
+        for task in running_tasks:
+            if task.pid and psutil.pid_exists(task.pid):
+                try:
+                    proc = psutil.Process(task.pid)
+                    if proc.status() in (psutil.STATUS_RUNNING, psutil.STATUS_SLEEPING):
+                        self.active_tasks[task.task_id] = proc
+                    else:
+                        task.status = "error"
+                        db.commit()
+                except Exception:
+                    task.status = "error"
+                    db.commit()
+            else:
+                task.status = "error"
+                db.commit()
 
     def start_task(self, task_id: str, command: List[str], log_path: str, db: Session):
         with self.lock:
@@ -67,6 +86,11 @@ class TaskManager:
 
 # Singleton instance
 task_manager = TaskManager()
+
+@router.on_event("startup")
+def on_startup():
+    db = next(get_db())
+    task_manager.reconstruct_from_db(db)
 
 @router.post("/tasks/run")
 def run_task(task: TaskCommand, db: Session = get_db()):
