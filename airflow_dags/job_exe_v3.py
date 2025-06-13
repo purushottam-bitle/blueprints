@@ -63,6 +63,14 @@ def merge_xml_reports(job_id: int):
         rebot(*xml_paths, output=merged_output)
     else:
         print("No XML files found to merge.")
+        
+def update_job_status(job_id: int):
+    status_update_url = f"http://taskmanager.local/api/jobs/{job_id}/complete"
+    response = requests.post(status_update_url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to update job status for job {job_id}: {response.text}")
+    print(f"Job {job_id} status updated to completed.")
+    
 
 def _allocate(**context):
     job_id = get_job_id_from_context(context)
