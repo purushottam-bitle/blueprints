@@ -86,3 +86,59 @@ When running **multiple Robot Framework commands via subprocess**, only **one co
 ---
 
 Would you like a diagnostic script or Docker-based isolation approach to help debug the conflict?
+
+
+
+Subject: CLM Test Execution Summary and Subprocess Execution Blocker
+
+Hi Team,
+
+As part of the CLM (Continuous Lifecycle Management) integration, here is a summary of the current implementation and a key blocker encountered during multi-suite test execution.
+
+✅ CLM Automation Execution Summary
+Overview:
+The CLM platform supports automated test execution using Robot Framework across distributed test beds. Tests can be scheduled via the CLM UI, and results are collected centrally after execution.
+
+Execution Flow:
+
+Test Scheduling:
+Users trigger test runs via the CLM UI. Each request is stored in the database with a queued status.
+
+Queue Processor:
+A background Python service monitors for queued test runs, checks device availability, and assigns suitable test beds.
+
+Device Farming Microservice (DFMS):
+
+Creates the test task
+
+Constructs Robot Framework commands
+
+Executes tests via subprocess
+
+Tracks logs and updates status
+
+Core Microservice:
+
+Monitors running tasks
+
+Updates task status (running, completed, etc.)
+
+Supports task tracking and reporting
+
+🔴 Blocker Issue
+Problem:
+When triggering multiple Robot Framework executions via subprocess, only one test run completes successfully, while all others fail — even when run with isolation mechanisms in place.
+
+Troubleshooting Attempts:
+
+#	Attempt	Outcome
+1	Sequential execution with unique test cases	❌ Failed
+2	Unique system users per process	❌ Failed
+3	Execution on separate machines (test beds)	❌ Failed
+4	Unique --outputdir and log files	❌ Failed
+5	Dedicated sessions per process	❌ Failed
+6	Separate logs, commands, and task records	❌ Failed; only one test consistently succeeded
+
+We are continuing to investigate this blocker to identify the root cause and enable reliable parallel execution.
+
+Please let me know if you need any further details.
