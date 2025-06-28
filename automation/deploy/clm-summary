@@ -1,0 +1,88 @@
+Here’s a clear and structured **CLM summary with blocker details**, formatted to be used in documentation, presentations, or status updates:
+
+---
+
+### ✅ **CLM Automation Test Execution Flow**
+
+#### 🔹 **Overview**
+
+As part of the **CLM (Continuous Lifecycle Management)** platform, the system enables scheduling and executing Robot Framework test runs across distributed test beds (nodes) and collecting test results centrally.
+
+---
+
+#### 🔸 **Workflow Summary**
+
+1. **Test Run Scheduling via CLM UI:**
+
+   * User selects test suite(s) and triggers the test run.
+   * A **test run entry** is saved in the database with status `queued`.
+
+2. **Background Queue Processor:**
+
+   * A Python background task continuously polls for `queued` test runs.
+   * When required devices are available on a test bed:
+
+     * It allocates devices.
+     * Sends an API call to the **Device Farming microservice** to start the task.
+
+3. **Device Farming Microservice (DFMS):**
+
+   * Accepts the test task.
+   * Generates appropriate Robot or Pabot commands.
+   * Executes the test run via `subprocess` on the test bed.
+   * Saves logs, output, and task status in DB.
+
+4. **Core Microservice (CLM Core):**
+
+   * Tracks task execution status (`running`, `completed`, `failed`, etc.).
+   * Supports retry, cancel, and real-time monitoring via APIs.
+   * Aggregates results (via DAG or external utility like `rebot`) into a central report.
+
+---
+
+### 🔴 **Blocker Issue**
+
+#### ❌ **Problem Statement:**
+
+When running **multiple Robot Framework commands via subprocess**, only **one command completes successfully**, while others **fail**, even with:
+
+* Separate `.robot` files
+* Different test case IDs
+* Isolated users or sessions per command
+* Separate machines per process
+
+---
+
+### 🧪 **Solutions Attempted (and Failed):**
+
+| Attempt                   | Description                                                     | Result                                  |
+| ------------------------- | --------------------------------------------------------------- | --------------------------------------- |
+| ✅ Sequential runs         | Run commands one after the other on same or different test beds | ❌ Failed                                |
+| ✅ Unique users            | Use different system users per test run                         | ❌ Failed                                |
+| ✅ Machine isolation       | Run each test case on a separate VM/test bed                    | ❌ Still faced conflicts or errors       |
+| ✅ Unique Robot output dir | Ensured different `--outputdir` per run                         | ❌ Did not help                          |
+| ✅ Separate task\_id/logs  | All logs were unique per task                                   | ❌ Logs still showed one task dominating |
+
+---
+
+### 🔍 **Possible Root Causes to Investigate**
+
+1. **Shared resource collisions** (e.g., environment vars, port usage, hardware like ADB/USB conflicts).
+2. **Robot / subprocess shell not fully isolated** when launched via `subprocess.Popen`.
+3. **Device contention or locking failures**, where one test consumes all input/output channels.
+4. **Reentrant code or shared config (e.g., environment variables or `resource.robot`)** being overwritten.
+
+---
+
+### ✅ **Next Steps & Suggestions**
+
+* ✔️ **Use `pabot`** for proper parallelism if multiple suites share the same environment.
+* ✔️ **Run subprocesses with fully isolated working directories and environments**.
+* ✔️ **Containerize each test run** (e.g., Docker per test bed) to avoid host-level conflicts.
+* ✔️ Validate with `psutil` or similar to track overlapping PIDs or resource access.
+* ✔️ Ensure **no device (`DUT1`) is reused** across concurrent test runs.
+* ❓ Consider switching from `subprocess` to **async process pools** or **Celery workers** with explicit queueing.
+
+---
+
+Would you like a diagnostic script or Docker-based isolation approach to help debug the conflict?
