@@ -18,8 +18,32 @@ logger.addHandler(handler)
 # ===================== UTIL HELPERS =====================
 
 def command_exists(cmd: str) -> bool:
-    """Check if a command exists in PATH."""
     return shutil.which(cmd) is not None
+
+
+def run_and_get_output(cmd: List[str]) -> str:
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode().strip()
+    except Exception:
+        return ""
+
+
+# ===================== VERSION HELPERS =====================
+
+def get_python_version() -> str:
+    return run_and_get_output([sys.executable, "--version"])
+
+
+def get_pip_version() -> str:
+    return run_and_get_output([sys.executable, "-m", "pip", "--version"])
+
+
+def get_node_version() -> str:
+    return run_and_get_output(["node", "--version"])
+
+
+def get_npm_version() -> str:
+    return run_and_get_output(["npm", "--version"])
 
 
 # ===================== PYTHON ENV =====================
@@ -32,13 +56,21 @@ def pip_exec() -> str:
     return sys.executable
 
 
-def list_installed_python_packages() -> List[str]:
+def list_installed_python_packages() -> Dict[str, str]:
+    """
+    Returns dict: { package: version }
+    """
     try:
-        output = subprocess.check_output([pip_exec(), "-m", "pip", "list"])
-        lines = output.decode().splitlines()[2:]  # Skip header
-        return [line.split()[0] for line in lines]
+        output = subprocess.check_output([pip_exec(), "-m", "pip", "list"]).decode()
+        lines = output.splitlines()[2:]  # Skip header
+        packages = {}
+        for line in lines:
+            cols = line.split()
+            if len(cols) >= 2:
+                packages[cols[0]] = cols[1]
+        return packages
     except Exception:
-        return []
+        return {}
 
 
 def is_python_package_installed(package: str) -> bool:
@@ -65,18 +97,22 @@ def node_available() -> bool:
     return command_exists("node") or command_exists("npm")
 
 
-def list_installed_node_packages() -> List[str]:
+def list_installed_node_packages() -> Dict[str, str]:
+    """
+    Returns dict: { package: version }
+    """
     try:
-        output = subprocess.check_output(["npm", "list", "-g", "--depth=0"], stderr=subprocess.STDOUT)
-        lines = output.decode().splitlines()[1:]  # Skip project root line
-        pkgs = []
+        output = subprocess.check_output(["npm", "list", "-g", "--depth=0"], stderr=subprocess.STDOUT).decode()
+        lines = output.splitlines()[1:]  # Skip first line
+        packages = {}
         for line in lines:
             if "@" in line:
-                pkg_name = line.strip().split("@")[0].replace("├── ", "").replace("└── ", "")
-                pkgs.append(pkg_name)
-        return pkgs
+                pkg = line.strip().replace("├── ", "").replace("└── ", "")
+                name, version = pkg.split("@")
+                packages[name] = version
+        return packages
     except Exception:
-        return []
+        return {}
 
 
 def is_node_package_installed(package: str) -> bool:
@@ -99,9 +135,8 @@ def uninstall_node_package(package: str) -> bool:
 
 # ===================== UNUSED PACKAGE SCAN =====================
 
-def scan_unused_packages(used_packages: List[str], installed_packages: List[str]) -> List[str]:
-    """Return packages that are installed but not in the used list."""
-    return [pkg for pkg in installed_packages if pkg not in used_packages]
+def scan_unused_packages(used_packages: List[str], installed_packages: Dict[str, str]) -> List[str]:
+    return [pkg for pkg in installed_packages.keys() if pkg not in used_packages]
 
 
 # ===================== WRAPPER FUNCTION =====================
@@ -111,15 +146,18 @@ def run_package_cleanup(
     used_python_packages: List[str] = None,
     used_node_packages: List[str] = None
 ) -> Dict[str, Any]:
-    """
-    Wrapper that:
-    - Checks env availability
-    - Removes requested packages
-    - Scans unused packages
-    - Returns JSON for DB logging
-    """
 
     result = {
+        "version_info": {
+            "python": get_python_version(),
+            "pip": get_pip_version(),
+            "node": get_node_version(),
+            "npm": get_npm_version(),
+        },
+        "installed_packages": {
+            "python": {},
+            "node": {},
+        },
         "python": {
             "env_available": python_available(),
             "packages_checked": [],
@@ -140,9 +178,11 @@ def run_package_cleanup(
     if python_available():
         logger.info("Python environment found.")
         installed_py = list_installed_python_packages()
+        result["installed_packages"]["python"] = installed_py
 
         for pkg in remove_packages:
             result["python"]["packages_checked"].append(pkg)
+
             if is_python_package_installed(pkg):
                 if uninstall_python_package(pkg):
                     result["python"]["packages_removed"].append(pkg)
@@ -150,9 +190,9 @@ def run_package_cleanup(
                 result["python"]["packages_not_found"].append(pkg)
 
         if used_python_packages:
-            unused_py = scan_unused_packages(used_python_packages, installed_py)
-            result["python"]["unused_packages"] = unused_py
-
+            result["python"]["unused_packages"] = scan_unused_packages(
+                used_python_packages, installed_py
+            )
     else:
         logger.warning("Python environment not found.")
 
@@ -160,9 +200,11 @@ def run_package_cleanup(
     if node_available():
         logger.info("Node environment found.")
         installed_node = list_installed_node_packages()
+        result["installed_packages"]["node"] = installed_node
 
         for pkg in remove_packages:
             result["node"]["packages_checked"].append(pkg)
+
             if is_node_package_installed(pkg):
                 if uninstall_node_package(pkg):
                     result["node"]["packages_removed"].append(pkg)
@@ -170,9 +212,9 @@ def run_package_cleanup(
                 result["node"]["packages_not_found"].append(pkg)
 
         if used_node_packages:
-            unused_node = scan_unused_packages(used_node_packages, installed_node)
-            result["node"]["unused_packages"] = unused_node
-
+            result["node"]["unused_packages"] = scan_unused_packages(
+                used_node_packages, installed_node
+            )
     else:
         logger.warning("Node environment not found.")
 
@@ -182,7 +224,7 @@ def run_package_cleanup(
 # ===================== SAMPLE USAGE =====================
 if __name__ == "__main__":
     output = run_package_cleanup(
-        remove_packages=["requests", "express"],   # Multiple packages
+        remove_packages=["requests", "express"],
         used_python_packages=["pip", "setuptools"],
         used_node_packages=["npm"]
     )
